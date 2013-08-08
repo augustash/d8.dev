@@ -1,0 +1,118 @@
+<?php
+
+/**
+ * @file
+ * Contains \Drupal\filter\FilterBag.
+ */
+
+namespace Drupal\filter;
+
+use Drupal\Component\Plugin\Exception\PluginException;
+use Drupal\Component\Utility\NestedArray;
+use Drupal\Component\Plugin\DefaultPluginBag;
+use Drupal\Component\Utility\String;
+
+/**
+ * A collection of filters.
+ */
+class FilterBag extends DefaultPluginBag {
+
+  /**
+   * All possible filter plugin IDs.
+   *
+   * @var array
+   */
+  protected $definitions;
+
+  /**
+   * {@inheritdoc}
+   *
+   * @return \Drupal\filter\Plugin\FilterInterface
+   */
+  public function &get($instance_id) {
+    return parent::get($instance_id);
+  }
+
+  /**
+   * Retrieves filter definitions and creates an instance for each filter.
+   *
+   * This is exclusively used for the text format administration page, on which
+   * all available filter plugins are exposed, regardless of whether the current
+   * text format has an active instance.
+   *
+   * @todo Refactor text format administration to actually construct/create and
+   *   destruct/remove actual filter plugin instances, using a library approach
+   *   à la blocks.
+   */
+  public function getAll() {
+    // Retrieve all available filter plugin definitions.
+    if (!$this->definitions) {
+      $this->definitions = $this->manager->getDefinitions();
+    }
+
+    // Ensure that there is an instance of all available filters.
+    // Note that getDefinitions() are keyed by $plugin_id. $instance_id is the
+    // $plugin_id for filters, since a single filter plugin can only exist once
+    // in a format.
+    foreach ($this->definitions as $plugin_id => $definition) {
+      if (!isset($this->pluginInstances[$plugin_id])) {
+        $this->initializePlugin($plugin_id);
+      }
+    }
+    return $this->pluginInstances;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function initializePlugin($instance_id) {
+    // Filters have a 1:1 relationship to text formats and can be added and
+    // instantiated at any time.
+    $definition = $this->manager->getDefinition($instance_id);
+
+    if (isset($definition)) {
+      // $configuration is the whole filter plugin instance configuration, as
+      // contained in the text format configuration. The default configuration
+      // is the filter plugin definition.
+      // @todo Configuration should not be contained in definitions. Move into a
+      //   FilterBase::init() method.
+      $configuration = $definition;
+      // Merge the actual configuration into the default configuration.
+      if (isset($this->configurations[$instance_id])) {
+        $configuration = NestedArray::mergeDeep($configuration, $this->configurations[$instance_id]);
+      }
+      $this->configurations[$instance_id] = $configuration;
+      parent::initializePlugin($instance_id);
+    }
+    else {
+      throw new PluginException(String::format("Unknown filter plugin ID '@filter'.", array('@filter' => $instance_id)));
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function sort() {
+    $this->getAll();
+    return parent::sort();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function sortHelper($aID, $bID) {
+    $a = $this->get($aID);
+    $b = $this->get($bID);
+    if ($a->status != $b->status) {
+      return !empty($a->status) ? -1 : 1;
+    }
+    if ($a->weight != $b->weight) {
+      return $a->weight < $b->weight ? -1 : 1;
+    }
+    if ($a->module != $b->module) {
+      return strnatcasecmp($a->module, $b->module);
+    }
+    return parent::sortHelper($aID, $bID);
+  }
+
+}
